@@ -6,9 +6,9 @@
 global.owner = ['6287767510608']
 global.mods = ['6287767510608']
 global.prems = ['6287767510608']
-global.nameowner = 'Lann'
+global.nameowner = 'Kasanvx'
 global.numberowner = '6287767510608'
-global.mail = 'support@tioprm.eu.org'
+global.mail = 'cs@Khasan.site'
 global.gc = 'https://chat.whatsapp.com/FDjn5WA234v8J6jMcb0zei'
 global.gcId = '120363424770471912@g.us' // JID grup syarat join
 global.instagram = 'https://instagram.com/erlanrahmat_14'
@@ -49,7 +49,7 @@ global.antiporn = true
 global.prefix = './#'
 
 // API KEY (WAJIB DIISI)
-global.lann = 'Kasan.7'
+global.lann = ''
 global.aksesKey = ''
 // Daftar: https://api.betabotz.eu.org
 
