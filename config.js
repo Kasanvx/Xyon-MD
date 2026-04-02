@@ -49,6 +49,9 @@ global.antiporn = true
 global.prefix = './#'
 
 // API KEY (WAJIB DIISI)
+global.shopee = {
+  apikey: ''
+}
 global.lann = ''
 global.aksesKey = ''
 // Daftar: https://api.betabotz.eu.org
