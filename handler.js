@@ -1019,7 +1019,7 @@ module.exports = {
                                 if (!gcMembers.includes(senderNum)) {
                                     const SEP = '⚡━━━━━━━━━━⚡'
                                     await conn.reply(m.chat,
-                                        `⚡ *A K S E S  D I T O L A K* ⚡\n${SEP}\n\n` +
+                                        `*A K S E S  D I T O L A K*\n${SEP}\n\n` +
                                         `⬡ *Status* » Kamu belum bergabung ke grup kami\n` +
                                         `⬡ *Syarat* » Harus masuk grup dulu baru bisa pakai bot\n\n` +
                                         `${SEP}\n` +
