@@ -1,4 +1,3 @@
-const wm = global.wm
 let handler = async (m, { conn, usedPrefix, command, args, isOwner, isAdmin, isROwner }) => {
   let isEnable = /true|enable|(turn)?on|1/i.test(command)
   let chat = global.db.data.chats[m.chat]
@@ -46,7 +45,7 @@ let handler = async (m, { conn, usedPrefix, command, args, isOwner, isAdmin, isR
       }
       chat.welcome = isEnable
       break
-    case 'autoacc':
+      case 'autoacc':
       if (!m.isGroup) {
         if (!isOwner) {
           global.dfail('group', m, conn)
@@ -57,7 +56,6 @@ let handler = async (m, { conn, usedPrefix, command, args, isOwner, isAdmin, isR
         throw false
       }
       chat.autoacc = isEnable
-      break
     case 'detect':
       if (!m.isGroup) {
         if (!isOwner) {
@@ -341,7 +339,6 @@ List option:
 | autosticker
 | autolevelup
 | antisticker
-| autoacc
 | detect
 | viewonce
 | document

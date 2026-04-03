@@ -1,142 +1,117 @@
-const {
-    BufferJSON, 
-    WA_DEFAULT_EPHEMERAL, 
-    generateWAMessageFromContent, 
-    proto, 
-    generateWAMessageContent, 
-    generateWAMessage, 
-    prepareWAMessageMedia, 
-    areJidsSameUser, 
-    getContentType 
-} = require('@adiwajshing/baileys');
+// credits : kasan 
+// improved by : Partner Coding
 
-process.env.TZ = 'Asia/Jakarta';
-let fs = require('fs');
-let path = require('path');
-let fetch = require('node-fetch');
-let moment = require('moment-timezone');
-let levelling = require('../lib/levelling');
+const GROUP_WM = 'https://chat.whatsapp.com/LknsianRgX9KVNtyTChwZc?mode=gi_t';
 
-let arrayMenu = [
-    'all', 'ai', 'main', 'database', 'downloader', 'rpg', 'rpgG', 'sticker', 'advanced', 'xp', 'fun', 'game', 'github', 'group', 'image', 'nsfw', 'info', 'internet', 'islam', 'kerang', 'maker', 'news', 'owner', 'voice', 'quotes', 'store', 'stalk', 'shortlink', 'tools', 'anonymous'
-];
+/**
+ * Fungsi untuk mendapatkan Waktu, Tanggal, dan Ucapan (Pagi/Siang/Sore/Malam)
+ */
+function getClockAndGreeting() {
+  const d = new Date();
+  
+  const date = d.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Jakarta' });
+  const time = d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' });
+  const currentHour = parseInt(d.toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: 'Asia/Jakarta' }));
+  
+  let greeting = 'Selamat Malam 🌙';
+  if (currentHour >= 4 && currentHour < 11) {
+    greeting = 'Selamat Pagi 🌅';
+  } else if (currentHour >= 11 && currentHour < 15) {
+    greeting = 'Selamat Siang ☀️';
+  } else if (currentHour >= 15 && currentHour < 18) {
+    greeting = 'Selamat Sore 🌇';
+  }
 
-const allTags = arrayMenu.reduce((acc, tag) => {
-    acc[tag] = `MENU ${tag.toUpperCase()}`;
-    return acc;
-}, {});
-allTags['all'] = 'SEMUA MENU';
+  return { date, time, greeting };
+}
 
-const defaultMenu = {
-    before: (global.menuBefore || '').trimStart(),
-    header: '⚡ *%category* ⚡',
-    body: '⬡ %cmd %islimit %isPremium',
-    footer: '⚡━━━━━━━━━━⚡',
-    after: global.menuAfter || ''
+const handler = async (m, { conn }) => {
+  const user = `@${m.sender.split('@')[0]}`;
+  const { date, time, greeting } = getClockAndGreeting();
+
+  // Teks menu dengan gaya "Modern & Rapi" (Box Style)
+  const text = `
+┌───「 *XYON OTP* 」
+│ 👋 ${greeting}, ${user}!
+│ 📅 ${date}
+│ ⏰ ${time} WIB
+└──────────────
+
+┌───「 *NOKOS & OTP* 」
+│ ◦ 📲 /nokos
+│ ◦ 🔑 /otp
+│ ◦ ❌ /cancel
+│ ◦ 💳 /deposit <nominal>
+│ ◦ 💰 /saldo
+│ ◦ 🔎 /ceksaldo
+│ ◦ ➕ /addsaldo
+│ ◦ 🔄 /resetsaldo
+│ ◦ 📖 /tutorial
+└──────────────
+
+┌───「 *MAIN* 」
+│ ◦ 🎁 /donasi <nominal>
+│ ◦ 📜 /donasiku
+│ ◦ 🏆 /donasitop
+│ ◦ 📋 /menu
+└──────────────
+
+┌───「 *GROUP* 」
+│ ◦ 🟢 /enable <option>
+│ ◦ 🔴 /disable <option>
+│ ◦ 🔗 /getlinkgroup
+└──────────────
+
+┌───「 *OWNER* 」
+│ ◦ 🧩 /getplugin [filename]
+│ ◦ 🔔 /notif on
+│ ◦ 🔕 /notif off
+│ ◦ ℹ️ /notif info
+│ ◦ 🧪 /notif test
+│ ◦ 🔄 /notif reset
+│ ◦ 💸 /tfsaldo @user/nomor <nominal>
+│ ◦ 📝 /sf <teks>
+│ ◦ 📈 /pricealert on
+│ ◦ 📉 /pricealert off
+│ ◦ 🛠️ /pricealert test
+│ ◦ 👤 /profil
+│ ◦ 📊 /stats
+│ ◦ 📋 /tarik list
+│ ◦ 🏧 /tarik <kode> <nohp> <nominal>
+└──────────────
+
+┌───「 *ADVANCED* 」
+│ ◦ ⌨️ /> 
+│ ◦ 🖥️ /=> 
+│ ◦ 💲 /$
+└──────────────
+
+┌───「 *TOOLS & INFO* 」
+│ ◦ 💳 /saldoadmin
+│ ◦ 📡 /getip
+│ ◦ 🏓 /ping
+│ ◦ 📊 /status
+└──────────────
+
+┌───「 *XP & DAFTAR* 」
+│ ◦ 📝 /daftar <nama>.<umur>
+│ ◦ 📝 /reg <nama>.<umur>
+│ ◦ 📝 /register <nama>.<umur>
+└──────────────
+
+🆘 _Butuh bantuan?_
+👉 ${GROUP_WM}
+  `.trim();
+
+  await conn.sendMessage(m.chat, {
+    text: text,
+    mentions: [m.sender]
+  }, { quoted: m });
 };
 
-let handler = async (m, { conn, usedPrefix: _p, args = [], command }) => {
-    try {
-        let { exp, limit, level } = global.db.data.users[m.sender];
-        let name = `@${m.sender.split`@`[0]}`;
-        let teks = args[0] || '';
-        
-        let d = new Date();
-        let locale = 'id';
-        let date = d.toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' });
-        let time = d.toLocaleTimeString(locale, { hour: 'numeric', minute: 'numeric', second: 'numeric' });
-        let uptime = clockString(process.uptime() * 1000);
-        
-        let help = Object.values(global.plugins).filter(plugin => !plugin.disabled).map(plugin => ({
-            help: Array.isArray(plugin.help) ? plugin.help : [plugin.help],
-            tags: Array.isArray(plugin.tags) ? plugin.tags : [plugin.tags],
-            limit: plugin.limit,
-            premium: plugin.premium
-        }));
-        
-        if (!teks) {
-            let menuList = `${defaultMenu.before}\n\n┌  ◦ *DAFTAR MENU*\n`;
-            for (let tag of arrayMenu) {
-                menuList += `│  ◦ ${_p}menu ${tag}\n`;
-            }
-            menuList += `└  \n\n${defaultMenu.after}`;
-            return sendMenu(m, conn, menuList, { name, uptime, date, time, _p });
-        }
-        
-        if (teks.toLowerCase() === 'all') {
-            let allMenus = `${defaultMenu.before}\n\n`;
-            for (let tag of arrayMenu) {
-                let categoryCommands = help.filter(menu => menu.tags.includes(tag));
-                if (categoryCommands.length > 0) {
-                    allMenus += `${defaultMenu.header.replace(/%category/g, allTags[tag])}\n`;
-                    for (let menu of categoryCommands) {
-                        for (let help of menu.help) {
-                            allMenus += defaultMenu.body
-                                .replace(/%cmd/g, _p + help)
-                                .replace(/%islimit/g, menu.limit ? '(Ⓛ)' : '')
-                                .replace(/%isPremium/g, menu.premium ? '(Ⓟ)' : '') + '\n';
-                        }
-                    }
-                    allMenus += `${defaultMenu.footer}\n\n`;
-                }
-            }
-            allMenus += defaultMenu.after;
-            return sendMenu(m, conn, allMenus, { name, uptime, date, time, _p });
-        }
-        
-        if (!allTags[teks]) return m.reply(`Menu "${teks}" tidak tersedia.\nSilakan ketik ${_p}menu untuk melihat daftar menu.`);
-        
-        let menuCategory = `${defaultMenu.before}\n\n${defaultMenu.header.replace(/%category/g, allTags[teks])}\n`;
-        let categoryCommands = help.filter(menu => menu.tags.includes(teks));
-        
-        for (let menu of categoryCommands) {
-            for (let help of menu.help) {
-                menuCategory += defaultMenu.body
-                    .replace(/%cmd/g, _p + help)
-                    .replace(/%islimit/g, menu.limit ? '(Ⓛ)' : '')
-                    .replace(/%isPremium/g, menu.premium ? '(Ⓟ)' : '') + '\n';
-            }
-        }
-        menuCategory += `${defaultMenu.footer}\n\n${defaultMenu.after}`;
-        return sendMenu(m, conn, menuCategory, { name, uptime, date, time, _p });
-    } catch (e) {
-        console.error(e);
-        conn.reply(m.chat, 'Maaf, menu sedang error', m);
-    }
-};
-
-handler.help = ['menu'];
+handler.command = /^(menu|help)$/i;
 handler.tags = ['main'];
-handler.command = /^(menu|help|bot)$/i;
-handler.exp = 3;
+handler.help = ['menu'];
+handler.register = true;
 
 module.exports = handler;
-
-async function sendMenu(m, conn, text, replace) {
-    text = text.replace(/%\w+/g, match => replace[match.slice(1)] || match);
-
-    await conn.sendFile(
-        m.chat,
-        'https://telegra.ph/file/3a34bfa58714bdef500d9.jpg',
-        null,
-        text,
-        m
-    );
-
-    // Music di Menu
-    let musicPath = path.join(__dirname, 'music.mp3');
-    if (fs.existsSync(musicPath)) {
-        await conn.sendMessage(m.chat, { 
-            audio: { url: musicPath }, 
-            mimetype: 'audio/mpeg',
-            ptt: false 
-        }, { quoted: m });
-    }
-}
-
-function clockString(ms) {
-    let h = Math.floor(ms / 3600000);
-    let m = Math.floor(ms / 60000) % 60;
-    let s = Math.floor(ms / 1000) % 60;
-    return [h, m, s].map(v => v.toString().padStart(2, 0)).join(':');
-}

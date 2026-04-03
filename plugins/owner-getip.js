@@ -1,6 +1,5 @@
 const fetch = require('node-fetch');
 
-const wm = global.wm
 let handler = async (m, { conn }) => {
   let ip = await fetch(`https://api.betabotz.eu.org/ip`).then(response => response.text());
   let message = `your ip: ${ip}`
