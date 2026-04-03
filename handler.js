@@ -1,4 +1,3 @@
-// credits : kasan
 const simple = require('./lib/simple')
 const util = require('util')
 
