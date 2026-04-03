@@ -1,0 +1,722 @@
+// credits : kasan
+const axios = require('axios')
+
+const APIKEY = global.rumahotp 
+const PROFIT = 500
+const OTP_TIMEOUT = 600000
+const CHECK_INTERVAL = 10000
+
+const services = {
+  wa: 13,
+  whatsapp: 13,
+  tele: 4,
+  telegram: 4,
+  gmail: 6,
+  google: 6,
+  ig: 16,
+  instagram: 16,
+  shopee: 36
+}
+
+function userData(id) {
+  global.db.data.users[id] ||= {}
+  let user = global.db.data.users[id]
+
+  if (typeof user.saldo !== 'number') user.saldo = 0
+  if (!user.deposit) user.deposit = null
+  if (!user.nokos) user.nokos = null
+
+  return user
+}
+
+function rupiah(x) {
+  return 'Rp' + Number(x || 0).toLocaleString('id-ID')
+}
+
+async function api(path, params = {}) {
+  const res = await axios.get(`https://www.rumahotp.io/api${path}`, {
+    headers: {
+      'x-apikey': APIKEY,
+      'Accept': 'application/json'
+    },
+    params,
+    timeout: 30000
+  })
+  return res.data
+}
+
+function pickBestPricelist(pricelist = []) {
+  let list = pricelist
+    .filter(v => v && v.provider_id && Number(v.price) > 0 && v.available !== false)
+    .map(v => ({
+      provider_id: String(v.provider_id),
+      price: Number(v.price || 0),
+      rate: Number(v.rate || 0),
+      stock: Number(v.stock || 0)
+    }))
+    .sort((a, b) => {
+      if (b.rate !== a.rate) return b.rate - a.rate
+      if (b.stock !== a.stock) return b.stock - a.stock
+      return a.price - b.price
+    })
+
+  return list[0] || null
+}
+
+async function getOperators(country, provider_id) {
+  try {
+    let res = await api('/v2/operators', { country, provider_id })
+    let list = Array.isArray(res?.data) ? res.data : []
+    return list
+      .map(v => ({
+        id: Number(v.id),
+        name: String(v.name || '').trim()
+      }))
+      .filter(v => v.id && v.name)
+  } catch {
+    return []
+  }
+}
+
+function resetSession(conn, jid) {
+  conn.nokosSession ||= {}
+  delete conn.nokosSession[jid]
+}
+
+function formatDate(ts) {
+  return new Date(ts).toLocaleString('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  }).replace('.', '.')
+}
+
+function maskPhone(phone) {
+  const s = String(phone)
+  if (s.length <= 5) return s
+  return s.slice(0, 3) + '*'.repeat(s.length - 6) + s.slice(-2)
+}
+
+function maskOtp(otp) {
+  const s = String(otp)
+  if (s.length <= 2) return s
+  return s[0] + '*'.repeat(s.length - 2) + s[s.length - 1]
+}
+
+let handler = async (m, { conn, args, usedPrefix, command, isOwner }) => {
+  if (!APIKEY) return m.reply('API RumahOTP belum diset.')
+
+  let user = userData(m.sender)
+  conn.nokosSession ||= {}
+  global.db.data.deposits ||= {}
+
+  const action = String(args[0] || '').toLowerCase()
+
+  if (!args.length) {
+    try {
+      const res = await api('/v2/services')
+      if (!res.success || !Array.isArray(res.data)) {
+        return m.reply('Gagal mengambil layanan.')
+      }
+
+      const list = res.data.slice(0, 50)
+      const options = {}
+
+      let txt = `Pilih Layanan (Wajib balas/reply pesan ini dengan angka):\n\n`
+
+      list.forEach((v, i) => {
+        txt += `${i + 1}. ${v.service_name}\n`
+        options[i + 1] = {
+          service_id: Number(v.service_code),
+          service_name: String(v.service_name || ''),
+          service_img: String(v.service_img || 'https://assets.rumahotp.com/apps/ot.png')
+        }
+      })
+
+      let msg = await m.reply(txt)
+
+      conn.nokosSession[m.sender] = {
+        stage: 'SERVICE',
+        id: msg.key.id,
+        options,
+        created: Date.now()
+      }
+
+      return
+    } catch {
+      return m.reply('Terjadi kesalahan server.')
+    }
+  }
+
+  if (action === 'ceksaldo') {
+    return m.reply(`Saldo Anda: ${rupiah(user.saldo)}`)
+  }
+
+  if (action === 'addsaldo') {
+    if (!isOwner) return m.reply('Khusus owner.')
+
+    let target = m.mentionedJid?.[0]
+      ? m.mentionedJid[0]
+      : args[1]
+      ? args[1].replace(/[^0-9]/g, '') + '@s.whatsapp.net'
+      : null
+
+    let amount = parseInt(args[2])
+    if (!target || isNaN(amount)) {
+      return m.reply(`Format: ${usedPrefix + command} addsaldo 628xxx nominal`)
+    }
+
+    global.db.data.users[target] ||= {}
+    if (typeof global.db.data.users[target].saldo !== 'number') {
+      global.db.data.users[target].saldo = 0
+    }
+
+    global.db.data.users[target].saldo += amount
+    return m.reply(`Berhasil. Saldo ${target.split('@')[0]} menjadi ${rupiah(global.db.data.users[target].saldo)}`)
+  }
+
+  if (action === 'resetsaldo') {
+    if (!isOwner) return m.reply('Khusus owner.')
+
+    let target = m.mentionedJid?.[0]
+      ? m.mentionedJid[0]
+      : args[1]
+      ? args[1].replace(/[^0-9]/g, '') + '@s.whatsapp.net'
+      : null
+
+    if (!target) return m.reply(`Format: ${usedPrefix + command} resetsaldo 628xxx`)
+    if (!global.db.data.users[target]) return m.reply('User tidak ditemukan.')
+
+    global.db.data.users[target].saldo = 0
+    return m.reply(`Saldo ${target.split('@')[0]} direset menjadi Rp0.`)
+  }
+
+  if (action === 'deposit') {
+    try {
+      let nominal = parseInt(args[1])
+      if (!nominal || isNaN(nominal)) {
+        return m.reply(`Format: ${usedPrefix + command} deposit <nominal>`)
+      }
+
+      let res = await api('/v1/deposit/create', {
+        amount: nominal,
+        payment_id: 'qris'
+      })
+
+      if (!res.success || !res.data) {
+        return m.reply(`Deposit gagal\n${res?.error?.message || ''}`)
+      }
+
+      let d = res.data
+      let total = Number(d?.currency?.total || d.amount || nominal)
+      let diterima = Number(d?.currency?.diterima || 0)
+      let fee = Number(d?.currency?.fee || 0)
+      let qr = String(d.qr || '')
+      let qrBuffer = Buffer.from((qr.split(',')[1] || ''), 'base64')
+
+      let sent = await conn.sendMessage(m.chat, {
+        image: qrBuffer,
+        caption:
+`*DEPOSIT QRIS*
+
+ID: ${d.id}
+Total bayar: ${rupiah(total)}
+Fee: ${rupiah(fee)}
+Saldo masuk: ${rupiah(diterima)}
+
+Cek pembayaran:
+${usedPrefix + command} cekdeposit ${d.id}`
+      }, { quoted: m })
+
+      user.deposit = {
+        id: String(d.id),
+        total,
+        diterima,
+        msgKey: sent?.key || null,
+        chat: m.chat
+      }
+
+      return
+    } catch {
+      return m.reply('Terjadi kesalahan.')
+    }
+  }
+
+  if (action === 'cekdeposit') {
+    try {
+      let deposit_id = args[1] || user.deposit?.id
+      if (!deposit_id) return m.reply(`Format: ${usedPrefix + command} cekdeposit <deposit_id>`)
+
+      let res = await api('/v1/deposit/get_status', { deposit_id })
+      if (!res.success || !res.data) return m.reply('Gagal cek deposit.')
+
+      let d = res.data
+      let status = String(d.status || '').toLowerCase()
+
+      if (status === 'success') {
+        if (global.db.data.deposits[deposit_id]) {
+          return m.reply('Deposit ini sudah diklaim.')
+        }
+
+        global.db.data.deposits[deposit_id] = true
+        let masuk = Number(user.deposit?.diterima || d.amount || 0)
+        user.saldo += masuk
+
+        try {
+          if (user.deposit?.msgKey) {
+            await conn.sendMessage(user.deposit.chat || m.chat, { delete: user.deposit.msgKey })
+          }
+        } catch {}
+
+        user.deposit = null
+        return m.reply(`Deposit berhasil!\nSaldo ditambahkan: ${rupiah(masuk)}\nTotal Saldo: ${rupiah(user.saldo)}`)
+      }
+
+      if (status === 'cancel') {
+        try {
+          if (user.deposit?.msgKey) {
+            await conn.sendMessage(user.deposit.chat || m.chat, { delete: user.deposit.msgKey })
+          }
+        } catch {}
+
+        user.deposit = null
+        return m.reply('Deposit dibatalkan / expired.')
+      }
+
+      return m.reply(`Status Deposit: ${status}`)
+    } catch {
+      return m.reply('Terjadi kesalahan.')
+    }
+  }
+
+  if (action === 'batal') {
+    resetSession(conn, m.sender)
+    return m.reply('Sesi nokos dibatalkan.')
+  }
+
+  if (action === 'list') {
+    try {
+      let res = await api('/v2/services')
+      if (!res.success || !Array.isArray(res.data)) return m.reply('Gagal mengambil layanan.')
+
+      let list = res.data.slice(0, 50)
+      let txt = '*LIST LAYANAN NOKOS*\n\n'
+      list.forEach((v, i) => {
+        txt += `${i + 1}. ${v.service_name}\n`
+      })
+      return m.reply(txt)
+    } catch {
+      return m.reply('Terjadi kesalahan server.')
+    }
+  }
+
+  if (action === 'service' || action === 'negara') {
+    return m.reply('Balas daftar nokos dengan angka saja.')
+  }
+
+  if (action in services) {
+    try {
+      let serviceId = services[action]
+      let res = await api('/v2/countries', { service_id: serviceId })
+
+      if (!res.success || !Array.isArray(res.data)) {
+        return m.reply('Gagal ambil negara.')
+      }
+
+      let srvRes = await api('/v2/services')
+      let sImg = 'https://assets.rumahotp.com/apps/ot.png'
+      if (srvRes.success && Array.isArray(srvRes.data)) {
+        let f = srvRes.data.find(x => x.service_code === serviceId)
+        if (f && f.service_img) sImg = f.service_img
+      }
+
+      let validCountries = res.data
+        .filter(v => v && Array.isArray(v.pricelist) && v.pricelist.length > 0)
+        .map(v => {
+          let best = pickBestPricelist(v.pricelist)
+          if (!best) return null
+          return {
+            number_id: Number(v.number_id),
+            cname: String(v.name || ''),
+            provider_id: String(best.provider_id),
+            base_price: Number(best.price || 0),
+            price: Number(best.price || 0) + PROFIT,
+            rate: Number(best.rate || v.rate || 0),
+            stock: Number(v.stock_total || 0),
+            service_id: serviceId,
+            service_name: action,
+            service_img: sImg
+          }
+        })
+        .filter(Boolean)
+        .sort((a, b) => {
+          if (b.rate !== a.rate) return b.rate - a.rate
+          return a.base_price - b.base_price
+        })
+        .slice(0, 50)
+
+      if (!validCountries.length) return m.reply('Negara tidak tersedia.')
+
+      let txt = `*Layanan: ${action.toUpperCase()}*\n`
+      txt += `Pilih Negara (balas/reply pesan ini dengan angka):\n\n`
+
+      let options = {}
+      validCountries.forEach((v, i) => {
+        txt += `${i + 1}. ${v.cname} - ${rupiah(v.price)}\n`
+        options[i + 1] = v
+      })
+
+      let msg = await conn.sendMessage(m.chat, {
+        image: { url: sImg },
+        caption: txt
+      }, { quoted: m })
+
+      conn.nokosSession[m.sender] = {
+        stage: 'COUNTRY',
+        id: msg.key.id,
+        options,
+        created: Date.now()
+      }
+
+      return
+    } catch {
+      return m.reply('Terjadi kesalahan.')
+    }
+  }
+
+  return m.reply(
+`*MENU NOKOS*
+
+${usedPrefix + command} wa
+${usedPrefix + command} tele
+${usedPrefix + command} gmail
+${usedPrefix + command} ig
+${usedPrefix + command} shopee
+
+${usedPrefix + command} deposit 5000
+${usedPrefix + command} cekdeposit
+${usedPrefix + command} ceksaldo
+${usedPrefix + command} batal`
+  )
+}
+
+handler.before = async (m, { conn }) => {
+  conn.nokosSession ||= {}
+
+  let session = conn.nokosSession[m.sender]
+  if (!session) return
+  if (!m.text || isNaN(m.text)) return
+  if (!m.quoted || m.quoted.id !== session.id) return
+
+  if (Date.now() - Number(session.created || 0) > 300000) {
+    resetSession(conn, m.sender)
+    return m.reply('Sesi nokos kadaluarsa. Silakan ulangi.')
+  }
+
+  let choice = parseInt(m.text)
+  let selected = session.options[choice]
+  if (!selected) return m.reply('Pilihan tidak valid.')
+
+  try {
+    if (session.stage === 'SERVICE') {
+      let sId = Number(selected.service_id)
+      let res = await api('/v2/countries', { service_id: sId })
+      if (!res.success || !Array.isArray(res.data)) {
+        resetSession(conn, m.sender)
+        return m.reply('Gagal ambil negara.')
+      }
+
+      let validCountries = res.data
+        .filter(v => v && Array.isArray(v.pricelist) && v.pricelist.length > 0)
+        .map(v => {
+          let best = pickBestPricelist(v.pricelist)
+          if (!best) return null
+          return {
+            number_id: Number(v.number_id),
+            cname: String(v.name || ''),
+            provider_id: String(best.provider_id),
+            base_price: Number(best.price || 0),
+            price: Number(best.price || 0) + PROFIT,
+            rate: Number(best.rate || v.rate || 0),
+            stock: Number(v.stock_total || 0),
+            service_id: sId,
+            service_name: selected.service_name,
+            service_img: selected.service_img
+          }
+        })
+        .filter(Boolean)
+        .sort((a, b) => {
+          if (b.rate !== a.rate) return b.rate - a.rate
+          return a.base_price - b.base_price
+        })
+        .slice(0, 50)
+
+      if (!validCountries.length) {
+        resetSession(conn, m.sender)
+        return m.reply('Negara kosong.')
+      }
+
+      let txt = `*Layanan: ${selected.service_name}*\n`
+      txt += `Pilih Negara (balas/reply pesan ini dengan angka):\n\n`
+
+      let options = {}
+      validCountries.forEach((v, i) => {
+        txt += `${i + 1}. ${v.cname} - ${rupiah(v.price)}\n`
+        options[i + 1] = v
+      })
+
+      let msg = await conn.sendMessage(m.chat, {
+        image: { url: selected.service_img },
+        caption: txt
+      }, { quoted: m })
+
+      conn.nokosSession[m.sender] = {
+        stage: 'COUNTRY',
+        id: msg.key.id,
+        options,
+        created: Date.now()
+      }
+      return
+    }
+
+    if (session.stage === 'COUNTRY') {
+      let operators = await getOperators(selected.cname, selected.provider_id)
+
+      if (!operators.length) {
+        resetSession(conn, m.sender)
+        return m.reply('Operator kosong. Silakan ulangi dari awal.')
+      }
+
+      let txt = `*Negara: ${selected.cname}*\n`
+      txt += `Pilih Operator (balas/reply pesan ini dengan angka):\n\n`
+
+      let options = {}
+      operators.forEach((v, i) => {
+        txt += `${i + 1}. ${v.name}\n`
+        options[i + 1] = {
+          ...selected,
+          operator_id: Number(v.id),
+          operator_name: v.name
+        }
+      })
+
+      let msg = await m.reply(txt)
+
+      conn.nokosSession[m.sender] = {
+        stage: 'OPERATOR',
+        id: msg.key.id,
+        options,
+        created: Date.now()
+      }
+      return
+    }
+
+    if (session.stage === 'OPERATOR') {
+      let user = userData(m.sender)
+
+      if (user.saldo < selected.price) {
+        resetSession(conn, m.sender)
+        return m.reply(`Saldo kurang.\nHarga ${rupiah(selected.price)}\nSaldo ${rupiah(user.saldo)}`)
+      }
+
+      let res = await api('/v2/orders', {
+        number_id: Number(selected.number_id),
+        provider_id: Number(selected.provider_id),
+        operator_id: Number(selected.operator_id)
+      })
+
+      if (!res.success || !res.data) {
+        resetSession(conn, m.sender)
+        return m.reply(`Gagal membuat order.\n${res?.error?.message || ''}`)
+      }
+
+      let d = res.data
+
+      user.saldo -= selected.price
+      user.nokos = {
+        id: String(d.order_id),
+        price: Number(selected.price),
+        time: Date.now(),
+        chat: m.chat,
+        userJid: m.sender,
+        phone: String(d.phone_number || ''),
+        service: String(d.service || selected.service_name || ''),
+        country: String(d.country || selected.cname || ''),
+        operator: String(selected.operator_name || 'any')
+      }
+
+      resetSession(conn, m.sender)
+
+      let censoredPhone = maskPhone(d.phone_number)
+
+      if (m.chat !== m.sender) {
+        try {
+          await conn.sendMessage(m.sender, {
+            text: `✅ *Pesanan Masuk (Private)*\n\n🆔 *Order ID* : ${d.order_id}\n📞 *Nomor* : ${d.phone_number}\n📱 *Layanan* : ${d.service || selected.service_name || ''}\n🌍 *Negara* : ${d.country || selected.cname || ''}\n📶 *Operator* : ${selected.operator_name || 'any'}`
+          })
+        } catch (e) {}
+      }
+
+      await m.reply(
+`✅ *Order Sukses!*
+
+🆔 *Order ID* : ${d.order_id}
+📞 *Nomor* : ${censoredPhone}
+📱 *Layanan* : ${d.service || selected.service_name || ''}
+🌍 *Negara* : ${d.country || selected.cname || ''}
+📶 *Operator* : ${selected.operator_name || 'any'}
+💰 *Harga* : ${rupiah(selected.price)}
+👛 *Sisa Saldo* : ${rupiah(user.saldo)}
+
+⏳ Menunggu OTP masuk otomatis...
+🕐 Maksimal *10 menit*
+
+❌ Batalkan manual: */cancel*
+_(minimal 2,5 menit setelah order)_
+
+❓ Masih bingung? Ketik */tutorial*`
+      )
+      return
+    }
+  } catch {
+    resetSession(conn, m.sender)
+    return m.reply('Terjadi kesalahan.')
+  }
+}
+
+handler.help = ['nokos']
+handler.tags = ['store']
+handler.command = /^(nokos)$/i
+
+module.exports = handler
+
+if (!global.nokosAuto) {
+  global.nokosAuto = true
+  const nokosStartTime = Date.now()
+
+  setInterval(async () => {
+    if (!global.conn) return
+    if (!global.db?.data?.users) return
+    if (!APIKEY) return
+
+    let users = global.db.data.users
+
+    for (let jid in users) {
+      let user = users[jid]
+      if (!user?.nokos?.id) continue
+
+      try {
+        let res = await axios.get(
+          `https://www.rumahotp.com/api/v1/orders/get_status`,
+          {
+            headers: {
+              'x-apikey': APIKEY,
+              'Accept': 'application/json'
+            },
+            params: {
+              order_id: user.nokos.id
+            },
+            timeout: 30000
+          }
+        )
+
+        let raw = res.data
+        if (!raw?.success || !raw?.data) continue
+
+        let d = raw.data
+        let status = String(d.status || '').toLowerCase()
+
+        if (d.otp_code && d.otp_code !== '-') {
+          const tgl      = formatDate(Date.now())
+          const phone    = String(d.phone_number || user.nokos.phone || '')
+          const otp      = String(d.otp_code || '')
+          const pcJid    = user.nokos.userJid || jid
+          const gcJid    = '120363424770471912@g.us'
+
+          try {
+            await global.conn.reply(pcJid,
+`📞 *Nomor Kamu (Private)*
+
+📱 Layanan : ${user.nokos.service || d.service || '-'}
+🌍 Negara  : ${user.nokos.country || d.country || '-'}
+📶 Operator: ${user.nokos.operator || 'any'}
+🆔 Order ID: ${d.order_id}
+
+📞 *Nomor Lengkap:*
+${phone}
+
+💰 Harga   : ${rupiah(user.nokos.price)}
+📆 Tanggal : ${tgl}
+
+_OTP akan dikirim ke group setelah masuk._`, null)
+          } catch (e) {}
+
+          try {
+            await global.conn.sendMessage(gcJid, {
+              text:
+`📢 *Transaksi OTP Selesai*
+
+@${pcJid.split('@')[0]} pesanan kamu sudah selesai!
+
+📱 *Layanan* : ${user.nokos.service || d.service || '-'}
+🌍 *Negara* : ${user.nokos.country || d.country || '-'}
+📶 *Operator* : ${user.nokos.operator || 'any'}
+
+🆔 *Order ID* : ${d.order_id}
+📞 *Nomor* : ${maskPhone(phone)}
+🔐 *Kode OTP* : *${otp}*
+💰 *Harga* : ${rupiah(user.nokos.price)}
+
+📆 *Tanggal* : ${tgl}`,
+              mentions: [pcJid]
+            })
+          } catch (e) {}
+
+          user.nokos = null
+          continue
+        }
+
+        if (status === 'canceled' || status === 'expiring') {
+          user.saldo += Number(user.nokos.price || 0)
+
+          await global.conn.sendMessage(user.nokos.chat, {
+            text: `Order ${d.order_id} berakhir.\nSaldo dikembalikan ${rupiah(user.nokos.price)}`
+          })
+
+          user.nokos = null
+          continue
+        }
+
+        const botUptime = Date.now() - nokosStartTime
+        if (botUptime < 60000) continue
+
+        if (Date.now() - Number(user.nokos.time || 0) > OTP_TIMEOUT) {
+          try {
+            await axios.get(
+              `https://www.rumahotp.com/api/v1/orders/set_status`,
+              {
+                headers: {
+                  'x-apikey': APIKEY,
+                  'Accept': 'application/json'
+                },
+                params: {
+                  order_id: user.nokos.id,
+                  status: 'cancel'
+                },
+                timeout: 30000
+              }
+            )
+          } catch {}
+
+          user.saldo += Number(user.nokos.price || 0)
+
+          await global.conn.sendMessage(user.nokos.chat, {
+            text: `Waktu habis.\nPesanan ${user.nokos.id} otomatis dibatalkan.\nSaldo ${rupiah(user.nokos.price)} dikembalikan.`
+          })
+
+          user.nokos = null
+        }
+      } catch {}
+    }
+  }, CHECK_INTERVAL)
+}
